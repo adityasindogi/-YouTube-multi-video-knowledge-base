@@ -112,22 +112,6 @@ question → embed_text() → ChromaDB.query() → top-K chunks
 
 ---
 
-## Suggested use cases
-
-### For Googly AI
-Add Andrew Ng, Andrej Karpathy, Yannic Kilcher, 3Blue1Brown videos.
-Ask: "Explain what attention mechanism does" → episode draft auto-generated.
-
-### For RCM / Healthcare
-Add AAPC webinars, HFMA sessions, denial management talks.
-Ask: "What do these videos say about CO-97 denial handling?"
-
-### For learning
-Add a full course playlist. Ask "What are the prerequisites for understanding transformers?"
-Compare: "How does each video explain gradient descent differently?"
-
----
-
 ## Tips
 
 - Videos need captions (auto-generated is fine — most YouTube videos have them)

@@ -1,86 +1,77 @@
 # vector_store.py — embeds transcript chunks and stores in ChromaDB
 import chromadb
-import ollama
-import json
 import os
+from fastembed import TextEmbedding
 
 
-EMBED_MODEL = "nomic-embed-text"   # pull with: ollama pull nomic-embed-text
-DB_PATH = "./output/chroma_db"     # persists to disk between runs
+EMBED_MODEL = "BAAI/bge-small-en-v1.5"  # ~60MB ONNX model, runs in-process, no HTTP
+DB_PATH = "./output/chroma_db"
+
+_client: chromadb.PersistentClient = None
+_collection: chromadb.Collection = None
+_embedder: TextEmbedding = None
+
+
+def get_embedder() -> TextEmbedding:
+    global _embedder
+    if _embedder is None:
+        _embedder = TextEmbedding(model_name=EMBED_MODEL)
+    return _embedder
 
 
 def get_collection(collection_name: str = "yt_knowledge_base"):
-    """Get or create a persistent ChromaDB collection."""
-    client = chromadb.PersistentClient(path=DB_PATH)
-    collection = client.get_or_create_collection(
-        name=collection_name,
-        metadata={"hnsw:space": "cosine"}   # cosine similarity for text
-    )
-    return collection
+    """Get or create a persistent ChromaDB collection (singleton)."""
+    global _client, _collection
+    if _collection is None:
+        _client = chromadb.PersistentClient(path=DB_PATH)
+        _collection = _client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"}
+        )
+    return _collection
 
 
-def embed_text(text: str) -> list:
-    """Get embedding vector for a piece of text using Ollama."""
-    response = ollama.embeddings(model=EMBED_MODEL, prompt=text)
-    return response["embedding"]
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    """Batch embed a list of texts. Much faster than one-at-a-time."""
+    embedder = get_embedder()
+    return [vec.tolist() for vec in embedder.embed(texts)]
 
 
 def index_video(video_metadata: dict, chunks: list, title: str = "") -> int:
     """
     Embed all chunks of a video and store in ChromaDB.
     Returns number of chunks indexed.
-
-    video_metadata: dict with video_id, url, etc.
-    chunks: list of chunk dicts from transcript.py
-    title: human-readable title for the video
     """
     collection = get_collection()
     video_id = video_metadata["video_id"]
 
-    # Check if already indexed (avoid re-embedding)
     existing = collection.get(where={"video_id": video_id})
     if existing["ids"]:
         print(f"  Video {video_id} already indexed ({len(existing['ids'])} chunks). Skipping.")
         return len(existing["ids"])
 
-    ids = []
-    embeddings = []
-    documents = []
-    metadatas = []
+    texts = [
+        f"Video: {title}\nTimestamp: {chunk['start_time']}\n\n{chunk['text']}"
+        for chunk in chunks
+    ]
+    embeddings = embed_texts(texts)
 
-    print(f"  Embedding {len(chunks)} chunks for '{title or video_id}'...")
-
-    for i, chunk in enumerate(chunks):
-        chunk_id = f"{video_id}_chunk_{i}"
-
-        # Create a rich text for embedding (includes context)
-        embed_text_content = f"Video: {title}\nTimestamp: {chunk['start_time']}\n\n{chunk['text']}"
-
-        try:
-            embedding = embed_text(embed_text_content)
-        except Exception as e:
-            print(f"  Warning: embedding failed for chunk {i}: {e}")
-            continue
-
-        ids.append(chunk_id)
-        embeddings.append(embedding)
-        documents.append(chunk["text"])
-        metadatas.append({
+    ids = [f"{video_id}_chunk_{i}" for i in range(len(chunks))]
+    documents = [chunk["text"] for chunk in chunks]
+    metadatas = [
+        {
             "video_id": video_id,
             "url": video_metadata["url"],
             "title": title,
             "start_time": chunk["start_time"],
             "end_time": chunk["end_time"],
             "chunk_index": i,
-        })
+        }
+        for i, chunk in enumerate(chunks)
+    ]
 
-        if (i + 1) % 5 == 0:
-            print(f"    {i + 1}/{len(chunks)} chunks embedded")
-
-    if ids:
-        collection.add(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
-        print(f"  Indexed {len(ids)} chunks successfully.")
-
+    collection.add(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
+    print(f"  Indexed {len(ids)} chunks successfully.")
     return len(ids)
 
 
@@ -92,11 +83,10 @@ def search(query: str, n_results: int = 5, video_ids: list = None) -> list:
     """
     collection = get_collection()
 
-    # Check if collection has anything
     if collection.count() == 0:
         return []
 
-    query_embedding = embed_text(query)
+    query_embedding = embed_texts([query])[0]
 
     # Build optional filter
     where_filter = None

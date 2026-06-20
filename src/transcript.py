@@ -2,6 +2,23 @@
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from datetime import timedelta
 import re
+import requests
+
+
+def get_video_title(video_id: str) -> str:
+    """Fetch video title from YouTube page."""
+    try:
+        resp = requests.get(
+            f"https://www.youtube.com/watch?v={video_id}",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=5
+        )
+        match = re.search(r'<title>(.*?) - YouTube</title>', resp.text)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    return f"Video {video_id}"
 
 
 def get_video_id(url: str) -> str:
@@ -34,14 +51,15 @@ def fetch_transcript(url: str, languages: list = None) -> dict:
         languages = ['en', 'en-US', 'en-GB', 'hi']  # Hindi fallback for Indian content
 
     video_id = get_video_id(url)
+    api = YouTubeTranscriptApi()
 
     try:
-        entries = YouTubeTranscriptApi.get_transcript(video_id, languages=languages)
+        entries = api.fetch(video_id, languages=languages).to_raw_data()
     except NoTranscriptFound:
         # Try auto-generated captions in any language
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript_list = api.list(video_id)
         transcript = transcript_list.find_generated_transcript(['en', 'hi'])
-        entries = transcript.fetch()
+        entries = transcript.fetch().to_raw_data()
     except TranscriptsDisabled:
         raise RuntimeError(f"Transcripts are disabled for video: {video_id}")
 

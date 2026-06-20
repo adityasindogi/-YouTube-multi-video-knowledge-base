@@ -3,15 +3,18 @@
 
 import streamlit as st
 import os
-import json
-from src.transcript import fetch_transcript, get_video_id
-from src.vector_store import index_video, search, list_indexed_videos, delete_video, get_stats
-from src.llm import summarise_chunk, summarise_video, answer_question, compare_across_videos, generate_episode_draft
+from src.transcript import fetch_transcript, get_video_title
+from src.vector_store import index_video, search, delete_video, get_stats
+from src.llm import summarise_chunk, summarise_video, answer_question_stream, compare_across_videos
+
+@st.cache_data(ttl=30)
+def cached_get_stats():
+    return get_stats()
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="YT Knowledge Base",
-    page_icon="🏏",
+    page_icon="",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -24,7 +27,7 @@ with st.sidebar:
     st.title("YT Knowledge Base")
     st.caption("Powered by Gemma 2:9b + ChromaDB")
 
-    stats = get_stats()
+    stats = cached_get_stats()
     col1, col2 = st.columns(2)
     col1.metric("Videos", stats["total_videos"])
     col2.metric("Chunks", stats["total_chunks"])
@@ -33,7 +36,7 @@ with st.sidebar:
 
     mode = st.radio(
         "Mode",
-        ["Add videos", "Chat with knowledge base", "Summaries", "Googly AI"],
+        ["Add videos", "Chat with knowledge base", "Summaries"],
         index=0
     )
 
@@ -71,8 +74,7 @@ if mode == "Add videos":
     col1, col2 = st.columns([1, 3])
     with col1:
         also_summarise = st.checkbox("Also generate summary", value=True)
-    with col2:
-        generate_episode = st.checkbox("Generate Googly AI episode draft", value=False)
+    
 
     if st.button("Add to knowledge base", type="primary"):
         urls = [u.strip() for u in urls_input.strip().split("\n") if u.strip()]
@@ -86,7 +88,7 @@ if mode == "Add videos":
                 with st.status(f"Fetching transcript...", expanded=True) as status:
                     try:
                         transcript = fetch_transcript(url)
-                        title = title_input or f"Video {transcript['video_id']}"
+                        title = title_input or get_video_title(transcript['video_id'])
                         st.write(f"Got {transcript['chunk_count']} chunks ({transcript['total_duration']} total)")
 
                         status.update(label="Embedding chunks into ChromaDB...")
@@ -120,16 +122,7 @@ if mode == "Add videos":
 
                             st.session_state[f"summary_{transcript['video_id']}"] = full_summary
                             st.write("Summary saved to", summary_path)
-
-                            if generate_episode:
-                                status.update(label="Writing Googly AI episode...")
-                                episode = generate_episode_draft(full_summary, title)
-                                episode_path = f"output/summaries/{safe_title}_episode.md"
-                                with open(episode_path, "w") as f:
-                                    f.write(f"# Googly AI Episode: {title}\n\n")
-                                    f.write(episode)
-                                st.write("Episode draft saved to", episode_path)
-
+                            
                         status.update(label="Done!", state="complete")
 
                     except Exception as e:
@@ -179,20 +172,19 @@ elif mode == "Chat with knowledge base":
 
             with st.chat_message("assistant"):
                 with st.spinner("Searching knowledge base..."):
-                    # Retrieve relevant chunks
                     results = search(question, n_results=n_chunks, video_ids=selected_video_ids)
 
-                    if not results:
-                        answer = "No relevant content found. Try adding more videos first."
-                    elif search_mode == "Compare across videos":
-                        answer = compare_across_videos(question, results)
-                    else:
-                        answer = answer_question(
-                            question, results,
-                            chat_history=st.session_state.chat_history[:-1]
-                        )
-
-                st.markdown(answer)
+                if not results:
+                    answer = "No relevant content found. Try adding more videos first."
+                    st.markdown(answer)
+                elif search_mode == "Compare across videos":
+                    answer = compare_across_videos(question, results)
+                    st.markdown(answer)
+                else:
+                    answer = st.write_stream(answer_question_stream(
+                        question, results,
+                        chat_history=st.session_state.chat_history[:-1]
+                    ))
 
                 # Show sources
                 with st.expander("Sources used"):

@@ -12,6 +12,42 @@ def _chat(messages: list, system: str = None) -> str:
     return response["message"]["content"]
 
 
+def _chat_stream(messages: list, system: str = None):
+    """Streaming chat call. Yields text tokens as they arrive."""
+    if system:
+        messages = [{"role": "system", "content": system}] + messages
+    for chunk in ollama.chat(model=MODEL, messages=messages, stream=True):
+        yield chunk["message"]["content"]
+
+
+def answer_question_stream(question: str, context_chunks: list, chat_history: list = None):
+    """Streaming version of answer_question."""
+    context_parts = []
+    for chunk in context_chunks:
+        meta = chunk["metadata"]
+        context_parts.append(
+            f"[From: {meta.get('title', 'Unknown')} | {meta.get('start_time', '')}]\n{chunk['chunk_text']}"
+        )
+    context = "\n\n---\n\n".join(context_parts)
+
+    system = """You are a helpful assistant answering questions about YouTube videos.
+You have been given relevant transcript excerpts to answer the question.
+Always mention which video and timestamp your answer comes from.
+If the answer isn't in the provided context, say so clearly."""
+
+    messages = []
+    if chat_history:
+        for role, content in chat_history[-6:]:
+            messages.append({"role": role, "content": content})
+
+    messages.append({
+        "role": "user",
+        "content": f"CONTEXT FROM TRANSCRIPTS:\n{context}\n\nQUESTION: {question}"
+    })
+
+    return _chat_stream(messages, system=system)
+
+
 # ── Summarisation ─────────────────────────────────────────────────────────────
 
 def summarise_chunk(chunk_text: str, video_title: str, timestamp: str) -> str:
