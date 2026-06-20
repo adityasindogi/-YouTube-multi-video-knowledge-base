@@ -24,10 +24,9 @@ Ask questions across multiple YouTube videos. All processing is **100% local** �
 https://ollama.ai — download and install
 ```
 
-### 2. Pull the models
+### 2. Pull the model
 ```bash
 ollama pull gemma2:9b          # main reasoning model
-ollama pull nomic-embed-text   # embedding model (small, fast)
 ```
 
 ### 3. Clone and set up Python environment
@@ -98,16 +97,16 @@ fetch_transcript()        — youtube-transcript-api, no key needed
     ↓
 chunk_transcript()        — splits into 5-min segments with timestamps
     ↓
-embed_text() × N chunks   — nomic-embed-text via Ollama (local embeddings)
+fastembed (batch)         — BAAI/bge-small-en-v1.5, ONNX, runs in-process
     ↓
 ChromaDB.add()            — stored on disk in output/chroma_db/
 
 At query time:
-question → embed_text() → ChromaDB.query() → top-K chunks
-                                                    ↓
-                                            Gemma 2:9b (local)
-                                                    ↓
-                                              Answer with sources
+question → fastembed → ChromaDB.query() → top-K chunks
+                                                ↓
+                                        Gemma 2:9b via Ollama
+                                                ↓
+                                      Streamed answer with sources
 ```
 
 ---
@@ -115,7 +114,8 @@ question → embed_text() → ChromaDB.query() → top-K chunks
 ## Tips
 
 - Videos need captions (auto-generated is fine — most YouTube videos have them)
-- Hindi videos work too — add `'hi'` to language list in `transcript.py`
-- First-time embedding is slow (30–60 sec per video). Subsequent runs reuse the DB.
-- Gemma 2:9b needs ~8GB RAM. Use `gemma2:2b` if on limited hardware.
-- The DB persists between runs — add videos once, chat forever.
+- Hindi videos work too — `'hi'` is already in the language fallback list
+- Embeddings are fast — fastembed runs in-process via ONNX, no Ollama call needed
+- The embedding model (~60MB) downloads automatically on first run and is cached
+- Gemma 2:9b needs ~8GB RAM. Use `gemma2:2b` if on limited hardware
+- The DB persists between runs — add videos once, chat forever
