@@ -1,0 +1,39 @@
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# ChromaDB data (local only — don't push to GitHub)
+output/chroma_db/
+
+# Generated summaries (optional — uncomment to track them)
+# output/summaries/
+
+# Environment variables
+.env
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/
+
+# Distribution
+dist/
+build/
+*.egg-info/
+*.egg
